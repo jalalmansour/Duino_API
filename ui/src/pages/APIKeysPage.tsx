@@ -297,7 +297,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
     if (!apiUrl || !authKey) return
     setLoading(true)
     try {
-      const r = await fetch(\`\${apiUrl}/v1/keys\`, {
+      const r = await fetch(`${apiUrl}/v1/keys`, {
         headers: { 'X-API-Key': authKey },
       })
       const d = await r.json()
@@ -312,7 +312,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
   const fetchExpiry = useCallback(async () => {
     if (!apiUrl) return
     try {
-      const r = await fetch(\`\${apiUrl}/v1/url/expiry\`)
+      const r = await fetch(`${apiUrl}/v1/url/expiry`)
       setUrlExpiry(await r.json())
     } catch {}
   }, [apiUrl])
@@ -327,7 +327,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
     setCreating(true)
     setError('')
     try {
-      const r = await fetch(\`\${apiUrl}/v1/keys\`, {
+      const r = await fetch(`${apiUrl}/v1/keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -346,7 +346,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
 
   const revokeKey = async (keyId: string) => {
     try {
-      const r = await fetch(\`\${apiUrl}/v1/keys/\${keyId}\`, {
+      const r = await fetch(`${apiUrl}/v1/keys/${keyId}`, {
         method: 'DELETE',
         headers: { 'X-API-Key': authKey },
       })
@@ -372,7 +372,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
         </div>
         {urlExpiry && (
           <div className="flex items-center gap-3 border border-slate px-4 py-2 rounded-[4px] bg-ink">
-            <span className={\`text-[10px] font-semibold uppercase tracking-[0.08em] \${urlExpiry.is_expired ? 'text-crimson' : 'text-mist'}\`}>
+            <span className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${urlExpiry.is_expired ? 'text-crimson' : 'text-mist'}`}>
               {urlExpiry.is_expired ? 'URL_EXPIRED' : 'TTL_GATEWAY'}
             </span>
             <span className="text-sm font-mono text-bone tracking-tighter">{urlExpiry.expires_in}</span>
@@ -457,9 +457,9 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
                 <button 
                   key={l.id}
                   onClick={() => setActiveLang(l.id)}
-                  className={\`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors rounded-[2px] \${
+                  className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors rounded-[2px] ${
                     activeLang === l.id ? 'bg-bone text-void' : 'text-mist hover:text-bone hover:bg-slate/30'
-                  }\`}
+                  }`}
                 >
                   {l.label}
                 </button>
@@ -517,12 +517,12 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
                         </TableCell>
                         <TableCell className="text-mist text-[13px] py-4">{fmt(k.created_at)}</TableCell>
                         <TableCell className="py-4">
-                          <span className={\`text-[13px] font-mono \${k.is_expired ? 'text-crimson' : 'text-bone'}\`}>
+                          <span className={`text-[13px] font-mono ${k.is_expired ? 'text-crimson' : 'text-bone'}`}>
                             {k.expires_in}
                           </span>
                         </TableCell>
                         <TableCell className="py-4">
-                          <span className={\`text-[11px] font-semibold uppercase tracking-tight \${k.is_active && !k.is_expired ? 'text-bone' : 'text-mist'}\`}>
+                          <span className={`text-[11px] font-semibold uppercase tracking-tight ${k.is_active && !k.is_expired ? 'text-bone' : 'text-mist'}`}>
                             {k.is_active && !k.is_expired ? 'Active' : 'Inactive'}
                           </span>
                         </TableCell>
