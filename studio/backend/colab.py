@@ -160,29 +160,72 @@ def _find_pip() -> list[str]:
 
 
 def _ensure_dependencies() -> None:
-    """Install requirements if not already satisfied."""
+    """
+    Install all requirements needed to run Duino API.
+
+    Strategy (most → least invasive):
+    1. Upgrade setuptools (fixes BackendUnavailable on Colab Python 3.12)
+    2. Add REPO_ROOT to sys.path directly — no build system needed
+    3. Install core requirements.txt packages
+    4. Try pip install -e (editable) with --no-build-isolation
+    5. Fall back to regular (non-editable) pip install .
+    6. Install GPU inference extras if NVIDIA GPU present
+    """
     pip = _find_pip()
 
-    def _pip(*args):
-        subprocess.run([*pip, *args], check=True, capture_output=True)
+    def _pip(*args, check: bool = True) -> int:
+        r = subprocess.run([*pip, *args], capture_output=True, text=True)
+        if check and r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, [*pip, *args],
+                                                r.stdout, r.stderr)
+        return r.returncode
 
-    # Core requirements
+    # Step 1 — Upgrade setuptools first (CRITICAL for Colab Python 3.12)
+    # Fixes: BackendUnavailable: Cannot import 'setuptools.backends.legacy'
+    _pip("install", "--upgrade", "setuptools", "wheel", "-q",
+         "--no-warn-script-location", check=False)
+
+    # Step 2 — Register repo on sys.path (works without any build system)
+    repo_str = str(REPO_ROOT)
+    if repo_str not in sys.path:
+        sys.path.insert(0, repo_str)
+
+    # Step 3 — Core requirements
     req = REPO_ROOT / "requirements.txt"
     if req.exists():
-        _pip("install", "-r", str(req), "-q", "--no-warn-script-location")
+        _pip("install", "-r", str(req), "-q", "--no-warn-script-location",
+             check=False)
 
-    # Install the package itself in editable mode
-    _pip("install", "-e", str(REPO_ROOT), "-q", "--no-warn-script-location")
+    # Step 4 — Install the package (try editable → fallback to regular)
+    installed = False
 
-    # GPU inference deps
+    # 4a: editable with no-build-isolation (avoids legacy backend issue)
+    if _pip("install", "-e", str(REPO_ROOT), "-q",
+            "--no-build-isolation", "--no-warn-script-location",
+            check=False) == 0:
+        installed = True
+
+    # 4b: editable without flag
+    if not installed:
+        if _pip("install", "-e", str(REPO_ROOT), "-q",
+                "--no-warn-script-location", check=False) == 0:
+            installed = True
+
+    # 4c: regular install (non-editable) as final fallback
+    if not installed:
+        _pip("install", str(REPO_ROOT), "-q",
+             "--no-warn-script-location", check=False)
+
+    # Step 5 — GPU inference extras (non-fatal)
     try:
-        result = subprocess.run(["nvidia-smi", "--query-gpu=name",
-                                  "--format=csv,noheader"],
-                                 capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=name",
+                             "--format=csv,noheader"],
+                            capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
             req_inf = REPO_ROOT / "requirements-inference.txt"
             if req_inf.exists():
-                _pip("install", "-r", str(req_inf), "-q", "--no-warn-script-location")
+                _pip("install", "-r", str(req_inf), "-q",
+                     "--no-warn-script-location", check=False)
     except Exception:
         pass
 

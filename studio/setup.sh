@@ -146,10 +146,22 @@ if [[ ! -f "$ENV_FILE" ]]; then
     warn ".env created — add HF_TOKEN and NGROK_AUTHTOKEN if needed"
 fi
 
-# ── 9. Install Duino API as editable package ──────────────────────────────────
-info "Installing duino-api package (editable)..."
-pip_install -e "$REPO_ROOT" --quiet
-success "duino-api installed"
+# ── 9. Upgrade setuptools + install Duino API package ────────────────────────
+# Upgrade setuptools first — fixes BackendUnavailable on Colab Python 3.12
+info "Upgrading setuptools..."
+pip_install --upgrade setuptools wheel --quiet
+
+info "Installing duino-api package..."
+# Try editable with --no-build-isolation first (avoids legacy backend lookup)
+if pip_install -e "$REPO_ROOT" --no-build-isolation --quiet 2>/dev/null; then
+    success "duino-api installed (editable)"
+elif pip_install -e "$REPO_ROOT" --quiet 2>/dev/null; then
+    success "duino-api installed (editable, standard)"
+else
+    # Final fallback: regular (non-editable) install
+    pip_install "$REPO_ROOT" --quiet
+    success "duino-api installed (non-editable)"
+fi
 
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════╗${NC}"
