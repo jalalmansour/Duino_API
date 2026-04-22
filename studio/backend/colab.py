@@ -29,7 +29,7 @@ def start(
     expose: bool      = True,
     hf_token: str     | None = None,
     ngrok_token: str  | None = None,
-    keep_alive: bool  = False,   # if True: block forever after launch (single-cell mode)
+    keep_alive: bool  = True,   # DEFAULT True — blocks forever, only STOP (■) exits
 ) -> dict[str, str]:
     """
     One-call platform launcher for any notebook environment.
