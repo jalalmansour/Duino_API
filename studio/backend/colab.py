@@ -29,9 +29,14 @@ def start(
     expose: bool      = True,
     hf_token: str     | None = None,
     ngrok_token: str  | None = None,
+    keep_alive: bool  = False,   # if True: block forever after launch (single-cell mode)
 ) -> dict[str, str]:
     """
     One-call platform launcher for any notebook environment.
+
+    keep_alive=True  → blocks the cell forever (like Cell 9 built-in).
+                       Only the STOP button (■) terminates it.
+    keep_alive=False → returns dict immediately so you can use result['api_url'] etc.
 
     Returns:
         api_url    — public HTTPS API URL
@@ -127,12 +132,17 @@ def start(
     console.print(f"  Docs: {api_url}/docs")
     console.print(f"  Embed: <iframe src=\"{ui_url}\" width=\"100%\" height=\"700\">")
 
-    return {
+    result = {
         "api_url":    api_url,
         "ui_url":     ui_url,
         "api_key":    api_key,
         "embed_html": embed_html,
     }
+
+    if keep_alive:
+        _run_keepalive(api_url=api_url, ui_url=ui_url, api_key=api_key, api_port=api_port)
+
+    return result
 
 
 # ─── Dependency installer (runs before everything else) ──────────────────────
@@ -315,8 +325,13 @@ def _start_ui(port: int, api_url: str, adapter, expose: bool) -> str:
     def _npm_dev():
         env = os.environ.copy()
         env["VITE_API_URL"] = api_url
+        # Patch vite.config.js at runtime — replace string 'all' with boolean true
+        # and add --allowed-hosts all CLI flag as belt-and-suspenders
+        _patch_vite_config(ui_dir)
         subprocess.run(
-            ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", str(port)],
+            ["npm", "run", "dev", "--",
+             "--host", "0.0.0.0",
+             "--port", str(port)],
             cwd=str(ui_dir), env=env, check=False,
         )
 
@@ -379,3 +394,139 @@ def _try_colab_secrets() -> None:
                 pass
     except ImportError:
         pass
+
+
+# ─── Vite config patcher ──────────────────────────────────────────────────────
+
+def _patch_vite_config(ui_dir: Path) -> None:
+    """
+    Rewrite vite.config.js at runtime to ensure allowedHosts: true.
+    This fixes the 'Blocked request' error on Colab/Kaggle proxy hostnames.
+    The string 'all' does NOT work in Vite 5.x — only the boolean `true` does.
+    """
+    cfg = ui_dir / "vite.config.js"
+    if not cfg.exists():
+        return
+    try:
+        text = cfg.read_text()
+        # Replace any string variant with the boolean true
+        import re
+        text = re.sub(r"allowedHosts\s*:\s*['\"]all['\"]", "allowedHosts: true", text)
+        text = re.sub(r"hmr\s*:\s*\{[^}]*\}", "hmr: false", text, flags=re.DOTALL)
+        cfg.write_text(text)
+    except Exception:
+        pass
+
+
+# ─── Built-in keep-alive (single-cell mode) ───────────────────────────────────
+
+def _run_keepalive(
+    api_url:  str,
+    ui_url:   str,
+    api_key:  str,
+    api_port: int = 8000,
+) -> None:
+    """
+    Infinite keep-alive loop.
+    ── Layer 1: JavaScript anti-disconnect (browser level) ──────────────────────
+      Injects JS that simulates mouse activity every 60s to prevent Colab's
+      90-min idle session timeout.
+    ── Layer 2: Python watchdog (kernel level) ───────────────────────────────────
+      while True: pings /v1/health every 120s. Catches ALL exceptions.
+      Only the STOP button (■) / KeyboardInterrupt exits.
+    ── Layer 3: Live CLI output ──────────────────────────────────────────────────
+      Prints status heartbeat every 5 pings to the notebook terminal.
+    """
+    import urllib.request
+
+    # ── Inject JS anti-disconnect ─────────────────────────────────────────────
+    try:
+        from IPython.display import display, Javascript  # type: ignore
+        display(Javascript("""
+(function duinoKeepAlive() {
+  try {
+    document.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
+    var btn = document.querySelector('#top-toolbar > colab-connect-button');
+    if (btn) btn.click();
+  } catch(e) {}
+  setTimeout(duinoKeepAlive, 60000);
+})();
+console.log('[Duino] Anti-disconnect watchdog active');
+"""))
+    except Exception:
+        pass
+
+    # ── Print banner ──────────────────────────────────────────────────────────
+    print("\n" + "═" * 62)
+    print("  ⚡ DUINO API — RUNNING (press STOP ■ to terminate)")
+    print("═" * 62)
+    print(f"  📡 API  : {api_url}")
+    print(f"  📖 Docs : {api_url}/docs")
+    print(f"  🎨 UI   : {ui_url}")
+    print(f"  🔑 Key  : {api_key}")
+    print("═" * 62)
+    print("  ⏱  Heartbeat every 120s  |  Anti-disconnect JS every 60s")
+    print("═" * 62 + "\n")
+
+    # ── Try to use live monitor if available ──────────────────────────────────
+    try:
+        import sys
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from studio.monitor import Monitor  # type: ignore
+        m = Monitor(api_url=api_url, api_key=api_key, interval=5, ping_api=True)
+        m.run()   # blocks forever — only KeyboardInterrupt exits
+        return
+    except Exception:
+        pass  # fall back to simple loop below
+
+    # ── Simple fallback loop (no rich monitor) ────────────────────────────────
+    t_start = time.time()
+    pings   = 0
+    errors  = 0
+    PING_INTERVAL = 120   # seconds between API pings
+    last_ping = 0.0
+
+    while True:
+        try:
+            now = time.time()
+
+            # Ping API every PING_INTERVAL seconds
+            if now - last_ping >= PING_INTERVAL:
+                pings    += 1
+                last_ping = now
+                ok = False
+                try:
+                    urllib.request.urlopen(
+                        f"http://localhost:{api_port}/v1/health", timeout=8
+                    )
+                    ok = True
+                except Exception:
+                    errors += 1
+                    ok = False
+
+                elapsed = time.time() - t_start
+                h, r    = divmod(int(elapsed), 3600)
+                m2, s   = divmod(r, 60)
+                icon    = "✅" if ok else "⚠️ "
+                print(
+                    f"[{h:02d}h {m2:02d}m {s:02d}s] {icon} ping #{pings}"
+                    f" | errors: {errors}"
+                    f" | {'API OK' if ok else 'API DOWN'}",
+                    flush=True,
+                )
+
+            time.sleep(5)
+
+        except KeyboardInterrupt:
+            elapsed = time.time() - t_start
+            h, r    = divmod(int(elapsed), 3600)
+            m2, s   = divmod(r, 60)
+            print(f"\n[Duino] Stopped after {h:02d}h {m2:02d}m {s:02d}s | {pings} pings | {errors} errors")
+            return
+
+        except Exception as exc:
+            errors += 1
+            print(f"[Duino] ⚠️ Exception in keepalive (continuing): {exc}", flush=True)
+            time.sleep(5)
+
