@@ -424,7 +424,7 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
         </div>
         {urlExpiry && (
           <div className="flex items-center gap-2 border border-border px-3 py-2 rounded">
-            <span className={\`text-xs uppercase \${urlExpiry.is_expired ? 'text-destructive' : 'text-muted-foreground'}\`}>
+            <span className={`text-xs uppercase ${urlExpiry.is_expired ? 'text-destructive' : 'text-muted-foreground'}`}>
               {urlExpiry.is_expired ? 'URL Expired' : 'URL Expires in'}
             </span>
             <span className="text-sm font-medium">{urlExpiry.expires_in}</span>
@@ -559,13 +559,13 @@ export default function APIKeysPage({ apiUrl, initialApiKey }: { apiUrl: string,
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{fmt(k.created_at)}</TableCell>
                       <TableCell>
-                        <span className={\`text-sm \${k.is_expired ? 'text-destructive' : 'text-foreground'}\`}>
+                        <span className={`text-sm ${k.is_expired ? 'text-destructive' : 'text-foreground'}`}>
                           {k.expires_in}
                         </span>
                       </TableCell>
                       <TableCell className="text-sm">{k.usage_count ?? 0}</TableCell>
                       <TableCell>
-                        <span className={\`text-sm \${k.is_active && !k.is_expired ? 'text-foreground' : 'text-muted-foreground'}\`}>
+                        <span className={`text-sm ${k.is_active && !k.is_expired ? 'text-foreground' : 'text-muted-foreground'}`}>
                           {k.is_active && !k.is_expired ? 'Active' : 'Inactive'}
                         </span>
                       </TableCell>
