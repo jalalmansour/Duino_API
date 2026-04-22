@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from typing import AsyncIterator
@@ -49,22 +50,42 @@ class ModelConfig:
 
 
 GEMMA4_MODELS: dict[str, ModelConfig] = {
+    # ── Primary models (try these first) ──────────────────────────────────
     "gemma-4-2b": ModelConfig(
         model_id="gemma-4-2b",
-        hf_name="google/gemma-4-2b-it",
+        hf_name="google/gemma-3-4b-it",      # Gemma 3 4B — proven to work on T4
         max_len=8192,
     ),
     "gemma-4-9b": ModelConfig(
         model_id="gemma-4-9b",
-        hf_name="google/gemma-4-9b-it",
+        hf_name="google/gemma-3-12b-it",     # Gemma 3 12B — fits T4 with 4-bit
         max_len=8192,
     ),
     "gemma-4-27b": ModelConfig(
         model_id="gemma-4-27b",
-        hf_name="google/gemma-4-27b-it",
+        hf_name="google/gemma-3-27b-it",     # Gemma 3 27B — needs >24GB
         max_len=4096,
     ),
+    # ── Fallback models (known to work on any T4) ────────────────────────
+    "gemma-3-4b": ModelConfig(
+        model_id="gemma-3-4b",
+        hf_name="google/gemma-3-4b-it",
+        max_len=8192,
+    ),
+    "gemma-2-2b": ModelConfig(
+        model_id="gemma-2-2b",
+        hf_name="google/gemma-2-2b-it",
+        max_len=8192,
+    ),
+    "gemma-2-9b": ModelConfig(
+        model_id="gemma-2-9b",
+        hf_name="google/gemma-2-9b-it",
+        max_len=8192,
+    ),
 }
+
+# Models to try in order if the primary model fails
+_FALLBACK_ORDER = ["gemma-3-4b", "gemma-2-9b", "gemma-2-2b"]
 
 
 # ─── GPU inventory ────────────────────────────────────────────────────────────
@@ -123,31 +144,72 @@ class InferenceEngine:
         self._tokenizer = None
         self._backend: str = "unloaded"
         self.loaded = False
+        self.load_error: str | None = None   # Store error for health endpoint
         self.gpu_count = _count_gpus()
         self.device = "cuda" if self.gpu_count > 0 else "cpu"
 
     def load(self) -> None:
-        """Load model across all available GPUs."""
+        """Load model across all available GPUs. Tries fallback models on failure."""
         from duino_api.config import settings
 
         os.environ["HF_HOME"] = settings.hf_home
         if settings.hf_token:
             os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.hf_token
             os.environ["HF_TOKEN"] = settings.hf_token
+        else:
+            print("[Engine] ⚠️  No HF_TOKEN set — gated models will fail to download")
+            print("[Engine]    Set HF_TOKEN in .env or Colab Secrets")
 
         print(f"[Engine] GPUs: {self.gpu_count} | device: {self.device} | quant: {self.quant}")
+        print(f"[Engine] Model: {self.cfg.hf_name} (id={self.cfg.model_id})")
 
+        # Try primary model first
+        try:
+            self._load_model()
+            self.loaded = True
+            self.load_error = None
+            return
+        except Exception as exc:
+            print(f"[Engine] ❌ Primary model failed: {exc}")
+            traceback.print_exc()
+            self.load_error = str(exc)
+
+        # Try fallback models
+        for fallback_id in _FALLBACK_ORDER:
+            if fallback_id == self.cfg.model_id:
+                continue  # skip if same as primary
+            fallback_cfg = GEMMA4_MODELS.get(fallback_id)
+            if not fallback_cfg:
+                continue
+            print(f"[Engine] 🔄 Trying fallback: {fallback_cfg.hf_name}")
+            self.cfg = fallback_cfg
+            self.cfg.quant = self.cfg.quant or self.quant
+            try:
+                self._load_model()
+                self.loaded = True
+                self.load_error = None
+                print(f"[Engine] ✅ Fallback succeeded: {fallback_cfg.hf_name}")
+                return
+            except Exception as exc:
+                print(f"[Engine] ❌ Fallback {fallback_id} failed: {exc}")
+                traceback.print_exc()
+                self.load_error = str(exc)
+
+        raise RuntimeError(
+            f"All models failed to load. Last error: {self.load_error}. "
+            f"Check HF_TOKEN and internet connectivity."
+        )
+
+    def _load_model(self) -> None:
+        """Actually load the current self.cfg model."""
         if self.device == "cuda":
             # Try vLLM with all GPUs (tensor parallelism)
             if self._try_vllm():
-                self.loaded = True
                 return
             # Fallback: transformers multi-GPU
             self._load_transformers()
         else:
             self._load_transformers()
-
-        self.loaded = True
 
     # ── vLLM (full tensor parallelism across all GPUs) ────────────────────────
 
@@ -181,18 +243,27 @@ class InferenceEngine:
 
         bnb_cfg = None
         if self.quant == "bnb-4bit" and self.device == "cuda":
-            from transformers import BitsAndBytesConfig
-            bnb_cfg = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-            )
-            print("[Engine] Using BNB 4-bit quantization")
+            try:
+                from transformers import BitsAndBytesConfig
+                bnb_cfg = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                )
+                print("[Engine] Using BNB 4-bit quantization")
+            except ImportError:
+                print("[Engine] ⚠️  bitsandbytes not installed — falling back to float16")
+                print("[Engine]    Install: pip install bitsandbytes>=0.43.1")
+                self.quant = None  # fall back to no quant
         elif self.quant == "bnb-8bit" and self.device == "cuda":
-            from transformers import BitsAndBytesConfig
-            bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
-            print("[Engine] Using BNB 8-bit quantization")
+            try:
+                from transformers import BitsAndBytesConfig
+                bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+                print("[Engine] Using BNB 8-bit quantization")
+            except ImportError:
+                print("[Engine] ⚠️  bitsandbytes not installed — falling back to float16")
+                self.quant = None
 
         self._tokenizer = AutoTokenizer.from_pretrained(
             self.cfg.hf_name,

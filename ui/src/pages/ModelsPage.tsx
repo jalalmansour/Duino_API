@@ -23,7 +23,7 @@ export default function ModelsPage({ apiUrl, apiKey, currentModel, onSelectModel
         const res = await fetch(`${apiUrl}/v1/models`, {
           headers: apiKey ? { 'X-API-Key': apiKey } : {}
         });
-        if (!res.ok) throw new Error('Failed to fetch models');
+        if (!res.ok) throw new Error('Models fetch failed');
         const data = await res.json();
         setApiModels(data.data || []);
       } catch (err: any) {
@@ -36,49 +36,63 @@ export default function ModelsPage({ apiUrl, apiKey, currentModel, onSelectModel
   }, [apiUrl, apiKey]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Models</h1>
-        <p className="text-sm text-muted-foreground mt-2">
-          Select and manage models for inference.
+        <h1 className="text-3xl font-semibold tracking-tight text-bone mb-3">Models</h1>
+        <p className="text-mist font-normal">
+          Select and provision inference resources for active sessions.
         </p>
       </div>
 
-      {error && <div className="p-4 bg-card border-l-2 border-destructive text-sm text-foreground">{error}</div>}
+      {error && (
+        <div className="p-4 bg-ink border-l-2 border-crimson text-[14px] text-bone">
+          {error}
+        </div>
+      )}
 
-      <Card className="bg-card shadow-none">
-        <CardHeader className="flex flex-row justify-between items-center">
+      <Card className="bg-ink border-slate rounded-[6px] shadow-none">
+        <CardHeader className="flex flex-row justify-between items-center border-b border-slate/50 pb-6">
           <div>
-            <CardTitle className="text-base font-semibold">Cloud Inference Models</CardTitle>
+            <CardTitle className="text-xs font-semibold text-mist uppercase tracking-[0.08em]">Provisioned Cloud Models</CardTitle>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => window.location.reload()} disabled={loading}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-[11px] uppercase tracking-widest bg-slate/20 border-slate rounded-[4px]"
+            onClick={() => window.location.reload()} 
+            disabled={loading}
+          >
             {loading ? 'Refreshing...' : 'Refresh'}
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {apiModels.length === 0 && !loading ? (
-            <p className="text-muted-foreground text-sm py-4">No models available from API.</p>
+            <p className="text-mist text-sm p-8">No models discovered in current gateway.</p>
           ) : (
-            <div className="rounded-md border border-border">
-              <Table>
-                <TableHeader className="bg-muted/50">
-                  <TableRow>
-                    <TableHead className="text-xs uppercase text-muted-foreground">Model ID</TableHead>
-                    <TableHead className="text-xs uppercase text-muted-foreground">Owner</TableHead>
-                    <TableHead className="text-xs uppercase text-muted-foreground">Status</TableHead>
-                    <TableHead className="text-xs uppercase text-muted-foreground text-right">Action</TableHead>
+            <div className="overflow-x-auto">
+              <Table className="rounded-none border-none">
+                <TableHeader className="bg-void">
+                  <TableRow className="border-slate hover:bg-transparent">
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4">Model ID</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4">Publisher</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4">State</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4 text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {apiModels.map(m => (
-                    <TableRow key={m.id} className="hover:bg-muted/50">
-                      <TableCell className="font-medium text-foreground">{m.id}</TableCell>
-                      <TableCell className="text-muted-foreground">{m.owned_by}</TableCell>
-                      <TableCell className="text-foreground">Available</TableCell>
-                      <TableCell className="text-right">
+                    <TableRow key={m.id} className="border-slate hover:bg-slate/10 transition-colors">
+                      <TableCell className="font-mono text-sm text-bone py-4">{m.id}</TableCell>
+                      <TableCell className="text-mist text-sm py-4">{m.owned_by}</TableCell>
+                      <TableCell className="py-4">
+                        <span className="text-[11px] font-medium text-bone uppercase tracking-tight">Active</span>
+                      </TableCell>
+                      <TableCell className="text-right py-4">
                         <Button 
-                          variant={currentModel === m.id ? 'default' : 'outline'}
-                          size="sm"
+                          variant={currentModel === m.id ? 'secondary' : 'outline'}
+                          className={`h-8 px-4 text-[11px] uppercase tracking-widest rounded-[4px] ${
+                            currentModel === m.id ? 'bg-bone text-void hover:bg-bone' : 'border-slate bg-slate/10'
+                          }`}
                           onClick={() => onSelectModel(m.id)}
                           disabled={currentModel === m.id}
                         >
@@ -94,39 +108,41 @@ export default function ModelsPage({ apiUrl, apiKey, currentModel, onSelectModel
         </CardContent>
       </Card>
 
-      <Card className="bg-card shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base font-semibold">Local MLX Models (macOS Apple Silicon)</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Run inference locally using Apple Silicon unified memory via the MLX framework.
+      <Card className="bg-ink border-slate rounded-[6px] shadow-none">
+        <CardHeader className="border-b border-slate/50 pb-6">
+          <CardTitle className="text-xs font-semibold text-mist uppercase tracking-[0.08em]">Local MLX Resources</CardTitle>
+          <CardDescription className="text-mist font-normal mt-1">
+            Execution via Apple Silicon unified memory / MLX framework.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="mb-6 space-y-2">
-            <p className="text-sm font-medium text-foreground">Installation command:</p>
-            <pre className="p-4 bg-background border border-border rounded-md overflow-x-auto text-xs font-mono text-muted-foreground">
+        <CardContent className="p-0">
+          <div className="p-8 border-b border-slate/50 bg-void/30">
+            <p className="text-[10px] font-semibold text-mist uppercase tracking-[0.08em] mb-4">Provisioning command</p>
+            <pre className="p-5 bg-void border border-slate rounded-none overflow-x-auto text-xs font-mono text-violet">
               <code>bash studio/install_gemma4_mlx.sh</code>
             </pre>
           </div>
 
-          <div className="rounded-md border border-border">
-            <Table>
-              <TableHeader className="bg-muted/50">
-                <TableRow>
-                  <TableHead className="text-xs uppercase text-muted-foreground">MLX Model ID</TableHead>
-                  <TableHead className="text-xs uppercase text-muted-foreground">Description</TableHead>
-                  <TableHead className="text-xs uppercase text-muted-foreground text-right">Action</TableHead>
+          <div className="overflow-x-auto">
+            <Table className="rounded-none border-none">
+              <TableHeader className="bg-void">
+                <TableRow className="border-slate hover:bg-transparent">
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4">MLX Resource ID</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4">Architecture</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-[0.08em] text-mist py-4 text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {MLX_MODELS.map(m => (
-                  <TableRow key={m.id} className="hover:bg-muted/50">
-                    <TableCell className="font-medium text-foreground">{m.id}</TableCell>
-                    <TableCell className="text-muted-foreground">{m.name}</TableCell>
-                    <TableCell className="text-right">
+                  <TableRow key={m.id} className="border-slate hover:bg-slate/10 transition-colors">
+                    <TableCell className="font-mono text-sm text-bone py-4">{m.id}</TableCell>
+                    <TableCell className="text-mist text-sm py-4">{m.name}</TableCell>
+                    <TableCell className="text-right py-4">
                       <Button 
-                        variant={currentModel === m.id ? 'default' : 'outline'}
-                        size="sm"
+                        variant={currentModel === m.id ? 'secondary' : 'outline'}
+                        className={`h-8 px-4 text-[11px] uppercase tracking-widest rounded-[4px] ${
+                          currentModel === m.id ? 'bg-bone text-void hover:bg-bone' : 'border-slate bg-slate/10'
+                        }`}
                         onClick={() => onSelectModel(m.id)}
                         disabled={currentModel === m.id}
                       >

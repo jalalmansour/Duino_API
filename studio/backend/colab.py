@@ -86,8 +86,8 @@ def start(
     console.print("  [yellow]Starting API server...[/]")
     _start_api(api_port)
 
-    # Wait with visible progress
-    started = _wait_for_api(api_port, timeout=90)
+    # Wait with visible progress — 300s timeout to allow model download on first run
+    started = _wait_for_api(api_port, timeout=300)
     if not started:
         # Show logs to help diagnose
         _show_server_log()
@@ -96,6 +96,8 @@ def start(
             f"Check /tmp/duino_api_server.log for details."
         )
     console.print("  [green]API server ready[/]")
+    # Always show server log for debugging model load issues
+    _show_server_log()
 
     # ── 5. Create API key ─────────────────────────────────────────────────────
     api_key = _create_key(api_port)
@@ -474,7 +476,13 @@ console.log('[Duino] Anti-disconnect watchdog active');
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
         from studio.monitor import Monitor  # type: ignore
-        m = Monitor(api_url=api_url, api_key=api_key, interval=5, ping_api=True)
+        m = Monitor(
+            api_url=api_url,
+            api_key=api_key,
+            interval=5,
+            ping_api=True,
+            local_port=api_port,    # CRITICAL: ping localhost, not external proxy
+        )
         m.run()   # blocks forever — only KeyboardInterrupt exits
         return
     except Exception:

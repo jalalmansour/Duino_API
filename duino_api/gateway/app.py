@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
@@ -72,9 +73,12 @@ async def lifespan(app: FastAPI):
         try:
             engine.load()
             state.engine = engine
-            print(f"✅  Model loaded: {cfg.hf_name} ({cfg.quant or 'no quant'})")
+            print(f"✅  Model loaded: {engine.cfg.hf_name} ({engine.cfg.quant or 'no quant'})")
         except Exception as exc:
             print(f"⚠️  Model load failed: {exc} — inference disabled")
+            traceback.print_exc()
+            # Store the engine even if loading failed so we can report the error
+            state.engine = engine
 
     yield
 
@@ -370,10 +374,21 @@ async def health():
     url_remaining = max(0.0, DEFAULT_TTL_SECONDS - elapsed)
     h, r = divmod(int(url_remaining), 3600)
     m, s = divmod(r, 60)
+
+    # Report model status with error details if loading failed
+    model_loaded = state.engine.loaded if state.engine else False
+    load_error = None
+    model_name = None
+    if state.engine:
+        load_error = state.engine.load_error
+        model_name = state.engine.cfg.hf_name if state.engine.cfg else None
+
     return {
         "status":         "ok",
         "uptime_seconds": round(time.time() - state.start_time),
-        "model_loaded":   state.engine.loaded if state.engine else False,
+        "model_loaded":   model_loaded,
+        "model_name":     model_name,
+        "load_error":     load_error,
         "redis_connected": state.redis is not None,
         "environment":    caps.runtime.value,
         "gpu":            caps.gpu_name,

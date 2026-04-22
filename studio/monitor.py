@@ -79,9 +79,10 @@ def _bar(value: float, total: float, width: int = 20) -> str:
     return f"[{bar}] {BOLD}{pct*100:5.1f}%{RESET}"
 
 
-def _api_health(api_url: str, api_key: str, timeout: int = 5) -> dict:
+def _api_health(local_url: str, api_key: str, timeout: int = 5) -> dict:
+    """Ping the API using the LOCAL url (localhost), never the external proxy."""
     try:
-        r = requests.get(f"{api_url}/v1/health",
+        r = requests.get(f"{local_url}/v1/health",
                          headers={"X-API-Key": api_key},
                          timeout=timeout)
         if r.status_code == 200:
@@ -107,11 +108,13 @@ class Monitor:
         api_key:  str  = "",
         interval: int  = 3,        # refresh every N seconds
         ping_api: bool = True,
+        local_port: int = 8000,    # ALWAYS ping localhost for health checks
     ):
-        self.api_url  = api_url
-        self.api_key  = api_key
-        self.interval = interval
-        self.ping_api = ping_api
+        self.api_url    = api_url           # external URL (display only)
+        self.local_url  = f"http://localhost:{local_port}"  # internal health check
+        self.api_key    = api_key
+        self.interval   = interval
+        self.ping_api   = ping_api
 
         self._start    = time.time()
         self._ticks    = 0
@@ -155,9 +158,9 @@ class Monitor:
     def _tick(self) -> None:
         self._ticks += 1
 
-        # Ping API every tick
+        # Ping API every tick — ALWAYS use localhost, never the external proxy
         if self.ping_api:
-            h = _api_health(self.api_url, self.api_key)
+            h = _api_health(self.local_url, self.api_key)
             with self._lock:
                 self._api_ok = h.get("_ok", False)
                 self._health = h

@@ -18,7 +18,7 @@ einops>=0.8.0
 huggingface-hub>=0.23.0
 
 # 4-bit / 8-bit quantization (Linux + CUDA only)
-# bitsandbytes>=0.43.1
+bitsandbytes>=0.43.1
 
 # vLLM (Linux + CUDA only — fastest inference)
 # vllm>=0.4.2

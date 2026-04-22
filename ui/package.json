@@ -11,6 +11,8 @@
   "dependencies": {
     "@assistant-ui/react": "^0.12.19",
     "@assistant-ui/react-markdown": "^0.12.3",
+    "@hugeicons/core-free-icons": "^4.1.1",
+    "@hugeicons/react": "^1.1.6",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-aspect-ratio": "^1.1.1",
