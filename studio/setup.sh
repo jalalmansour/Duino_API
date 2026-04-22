@@ -32,7 +32,7 @@ info "OS: $OS | Colab: $IS_COLAB | Kaggle: $IS_KAGGLE"
 PYTHON=""
 for cmd in python3.11 python3.10 python3 python; do
     if command -v "$cmd" &>/dev/null; then
-        VER=$("$cmd" -c "import sys; print(sys.version_info >= (3,10))" 2>/dev/null)
+        VER=$("$cmd" -c "import sys; print(sys.version_info >= (3,10))" 2>/dev/null || echo "False")
         if [[ "$VER" == "True" ]]; then
             PYTHON="$cmd"; break
         fi
@@ -41,83 +41,114 @@ done
 [[ -z "$PYTHON" ]] && error "Python 3.10+ required. Install from https://python.org"
 success "Python: $($PYTHON --version)"
 
-# ── 3. pip upgrade ────────────────────────────────────────────────────────────
-info "Upgrading pip..."
-"$PYTHON" -m pip install --upgrade pip --quiet
+# ── 3. Find pip (CRITICAL fix for Colab where python3.10 -m pip fails) ────────
+PIP=""
+# Try standalone pip commands first (works on Colab)
+for cmd in pip3 pip pip3.11 pip3.10; do
+    if command -v "$cmd" &>/dev/null; then
+        PIP="$cmd"; break
+    fi
+done
+# Fallback: python -m pip with the found python binary
+if [[ -z "$PIP" ]]; then
+    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then
+        PIP="$PYTHON -m pip"
+    fi
+fi
+# Last resort: bootstrap pip via ensurepip
+if [[ -z "$PIP" ]]; then
+    warn "pip not found — bootstrapping via ensurepip..."
+    "$PYTHON" -m ensurepip --upgrade 2>/dev/null || true
+    # Try again after bootstrap
+    for cmd in pip3 pip; do
+        command -v "$cmd" &>/dev/null && { PIP="$cmd"; break; }
+    done
+fi
+[[ -z "$PIP" ]] && error "Cannot find pip. Please install pip manually."
+success "pip: $($PIP --version)"
 
-# ── 4. Core requirements ──────────────────────────────────────────────────────
+# Helper: run pip with the found pip command
+pip_install() { $PIP install "$@"; }
+
+# ── 4. pip upgrade ────────────────────────────────────────────────────────────
+info "Upgrading pip..."
+pip_install --upgrade pip --quiet
+
+# ── 5. Core requirements ──────────────────────────────────────────────────────
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-info "Installing core requirements from $REPO_ROOT/requirements.txt..."
-"$PYTHON" -m pip install -r "$REPO_ROOT/requirements.txt" --quiet
+info "Repo root: $REPO_ROOT"
+info "Installing core requirements..."
+pip_install -r "$REPO_ROOT/requirements.txt" --quiet
 success "Core requirements installed"
 
-# ── 5. GPU detection + inference requirements ─────────────────────────────────
+# ── 6. GPU detection + inference requirements ─────────────────────────────────
 GPU_AVAILABLE=false
 if command -v nvidia-smi &>/dev/null; then
     VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
-    info "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) (${VRAM} MB)"
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo unknown)
+    info "GPU: $GPU_NAME (${VRAM} MB)"
     GPU_AVAILABLE=true
 
-    # PyTorch with CUDA
-    if ! "$PYTHON" -c "import torch; assert torch.cuda.is_available()" &>/dev/null; then
-        info "Installing PyTorch with CUDA 12.1..."
-        "$PYTHON" -m pip install torch --index-url https://download.pytorch.org/whl/cu121 --quiet
+    # PyTorch with CUDA — skip if already installed correctly
+    if ! "$PYTHON" -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
+        info "Installing PyTorch CUDA 12.1..."
+        pip_install torch --index-url https://download.pytorch.org/whl/cu121 --quiet
+    else
+        success "PyTorch CUDA already installed"
     fi
 
-    # bitsandbytes (Linux only — quantization)
-    if $IS_LINUX; then
-        "$PYTHON" -m pip install bitsandbytes>=0.43.1 --quiet 2>/dev/null || warn "bitsandbytes not installed (optional)"
+    # bitsandbytes (Linux only)
+    if $IS_LINUX || $IS_COLAB; then
+        pip_install bitsandbytes --quiet 2>/dev/null || warn "bitsandbytes optional — skipping"
     fi
 
-    "$PYTHON" -m pip install -r "$REPO_ROOT/requirements-inference.txt" --quiet
+    pip_install -r "$REPO_ROOT/requirements-inference.txt" --quiet
     success "GPU inference requirements installed"
 else
-    warn "No NVIDIA GPU found — CPU inference only"
-    # CPU PyTorch
-    if ! "$PYTHON" -c "import torch" &>/dev/null; then
+    warn "No NVIDIA GPU — CPU inference only"
+    if ! "$PYTHON" -c "import torch" &>/dev/null 2>&1; then
         info "Installing CPU PyTorch..."
-        "$PYTHON" -m pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet
+        pip_install torch --index-url https://download.pytorch.org/whl/cpu --quiet
     fi
-    "$PYTHON" -m pip install transformers accelerate sentencepiece einops huggingface-hub --quiet
+    pip_install transformers accelerate sentencepiece einops huggingface-hub --quiet
     success "CPU inference requirements installed"
 fi
 
-# ── 6. Node.js check (for React UI) ──────────────────────────────────────────
+# ── 7. Node.js (for React UI) ─────────────────────────────────────────────────
 if command -v node &>/dev/null; then
     success "Node.js: $(node --version)"
+    if [[ -f "$REPO_ROOT/ui/package.json" ]]; then
+        info "Installing React UI dependencies..."
+        npm install --prefix "$REPO_ROOT/ui" --silent 2>/dev/null || true
+        success "React UI ready"
+    fi
 else
-    warn "Node.js not found — React UI will not be available"
-    info  "Install Node.js: https://nodejs.org"
-
-    # Auto-install on Colab/Linux
+    warn "Node.js not found — React UI unavailable (optional)"
+    # Auto-install on Colab/Linux via nvm
     if $IS_COLAB || $IS_LINUX; then
-        info "Attempting Node.js install via nvm..."
+        info "Installing Node.js 20 via nvm..."
         curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &>/dev/null || true
         export NVM_DIR="$HOME/.nvm"
         # shellcheck disable=SC1091
-        [[ -s "$NVM_DIR/nvm.sh" ]] && source "$NVM_DIR/nvm.sh"
-        nvm install 20 --silent 2>/dev/null && nvm use 20 --silent 2>/dev/null || warn "nvm install failed — install Node.js manually"
+        [[ -s "$NVM_DIR/nvm.sh" ]] && source "$NVM_DIR/nvm.sh" || true
+        nvm install 20 --silent &>/dev/null && nvm use 20 --silent &>/dev/null || warn "nvm install failed"
+        if command -v node &>/dev/null && [[ -f "$REPO_ROOT/ui/package.json" ]]; then
+            npm install --prefix "$REPO_ROOT/ui" --silent 2>/dev/null || true
+            success "React UI ready"
+        fi
     fi
-fi
-
-# ── 7. React UI dependencies ──────────────────────────────────────────────────
-UI_DIR="$REPO_ROOT/ui"
-if command -v npm &>/dev/null && [[ -f "$UI_DIR/package.json" ]]; then
-    info "Installing React UI dependencies..."
-    npm install --prefix "$UI_DIR" --silent
-    success "React UI dependencies installed"
 fi
 
 # ── 8. .env setup ─────────────────────────────────────────────────────────────
 ENV_FILE="$REPO_ROOT/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
     cp "$REPO_ROOT/.env.example" "$ENV_FILE"
-    warn ".env created from .env.example — add your HF_TOKEN and NGROK_AUTHTOKEN"
+    warn ".env created — add HF_TOKEN and NGROK_AUTHTOKEN if needed"
 fi
 
 # ── 9. Install Duino API as editable package ──────────────────────────────────
-info "Installing duino-api package..."
-"$PYTHON" -m pip install -e "$REPO_ROOT" --quiet
+info "Installing duino-api package (editable)..."
+pip_install -e "$REPO_ROOT" --quiet
 success "duino-api installed"
 
 echo ""
@@ -127,6 +158,6 @@ echo -e "${BOLD}${GREEN}╚═════════════════�
 echo ""
 echo -e "  Start platform : ${CYAN}duinobot deploy${NC}"
 echo -e "  API only       : ${CYAN}duinobot serve${NC}"
-echo -e "  Health check   : ${CYAN}duinobot status${NC}"
+echo -e "  Status         : ${CYAN}duinobot status${NC}"
 echo -e "  API docs       : ${CYAN}http://localhost:8000/docs${NC}"
 echo ""
