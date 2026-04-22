@@ -1,0 +1,63 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env.local
+
+# ── Secrets — NEVER commit ────────────────────────────────────────────────────
+.env
+*.pem
+*.key
+secrets.json
+
+# ── HuggingFace model cache ───────────────────────────────────────────────────
+.cache/
+hf_cache/
+models/
+*.safetensors
+*.bin
+*.gguf
+*.ggml
+*.pt
+*.pth
+
+# ── Node / React ──────────────────────────────────────────────────────────────
+node_modules/
+ui/dist/
+ui/.vite/
+*.tsbuildinfo
+.npm/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker/volumes/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+tmp/
+temp/
+
+# ── Redis dump ────────────────────────────────────────────────────────────────
+dump.rdb

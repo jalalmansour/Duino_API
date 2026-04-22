@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: duino-gateway
+    ports:
+      - "${DUINO_PORT:-8000}:8000"
+    environment:
+      - DUINO_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-2b}
+      - HF_TOKEN=${HF_TOKEN}
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: duino-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  ui:
+    image: node:20-alpine
+    container_name: duino-ui
+    working_dir: /app
+    command: sh -c "npm install && npm run build && npm run preview -- --host 0.0.0.0 --port 3000"
+    ports:
+      - "${UI_PORT:-3000}:3000"
+    volumes:
+      - ../ui:/app
+    environment:
+      - VITE_API_URL=http://gateway:8000
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  redis-data:

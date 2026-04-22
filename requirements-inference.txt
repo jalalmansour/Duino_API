@@ -1,0 +1,24 @@
+# ── Duino API — GPU / Inference Requirements ────────────────────────────────
+# Install AFTER requirements.txt:
+#   pip install -r requirements-inference.txt
+#
+# NOTE: torch must be installed separately matching your CUDA version.
+# See: https://pytorch.org/get-started/locally/
+#
+# Quick GPU install (CUDA 12.1):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install -r requirements-inference.txt
+
+-r requirements.txt
+
+transformers>=4.41.0
+accelerate>=0.30.0
+sentencepiece>=0.2.0
+einops>=0.8.0
+huggingface-hub>=0.23.0
+
+# 4-bit / 8-bit quantization (Linux + CUDA only)
+# bitsandbytes>=0.43.1
+
+# vLLM (Linux + CUDA only — fastest inference)
+# vllm>=0.4.2
