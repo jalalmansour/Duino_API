@@ -318,7 +318,7 @@ def _create_key(port: int) -> str:
 # ─── React UI ─────────────────────────────────────────────────────────────────
 
 def _start_ui(port: int, api_url: str, adapter, expose: bool) -> str:
-    ui_dir   = REPO_ROOT / "ui"
+    ui_dir   = REPO_ROOT / "frontend"
     dist_dir = ui_dir / "dist"
 
     if not ui_dir.exists():

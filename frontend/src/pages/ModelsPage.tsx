@@ -4,10 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const MLX_MODELS = [
-  { id: 'unsloth/gemma-4-E2B-it-UD-MLX-4bit', name: 'Gemma 4 E2B (MLX 4-bit)' },
-  { id: 'unsloth/gemma-4-E4B-it-UD-MLX-4bit', name: 'Gemma 4 E4B (MLX 4-bit)' },
-  { id: 'unsloth/gemma-4-26b-a4b-it-UD-MLX-4bit', name: 'Gemma 4 26B A4B (MLX 4-bit)' },
-  { id: 'unsloth/gemma-4-31b-it-UD-MLX-4bit', name: 'Gemma 4 31B (MLX 4-bit, Vision)' },
+  { id: 'Duino/gemma-4-E2B-it-UD-MLX-4bit', name: 'Gemma 4 E2B (MLX 4-bit)' },
+  { id: 'Duino/gemma-4-E4B-it-UD-MLX-4bit', name: 'Gemma 4 E4B (MLX 4-bit)' },
+  { id: 'Duino/gemma-4-26b-a4b-it-UD-MLX-4bit', name: 'Gemma 4 26B A4B (MLX 4-bit)' },
+  { id: 'Duino/gemma-4-31b-it-UD-MLX-4bit', name: 'Gemma 4 31B (MLX 4-bit, Vision)' },
 ];
 
 export default function ModelsPage({ apiUrl, apiKey, currentModel, onSelectModel }: any) {
