@@ -19,3 +19,5 @@ opentelemetry-api>=1.24.0
 opentelemetry-sdk>=1.24.0
 requests>=2.32.0
 packaging>=24.0
+# Fix: ipython 7.34.0 requires jedi>=0.16 (Colab dependency conflict warning)
+jedi>=0.16
