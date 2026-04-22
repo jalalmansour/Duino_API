@@ -15,7 +15,11 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
-from duino_api.auth.keys import APIKey, APIKeyStore, InMemoryKeyStore, generate_key
+from duino_api.auth.keys import (
+    APIKey, APIKeyStore, InMemoryKeyStore,
+    generate_key, hash_key, make_api_key,
+    DEFAULT_TTL_SECONDS,
+)
 from duino_api.auth.quota import (
     TIERS, InMemoryRateLimiter, RateLimitExceeded, RedisRateLimiter,
 )
@@ -32,6 +36,9 @@ class _State:
     session_mgr: RedisSessionManager | InMemorySessionManager = InMemorySessionManager()
     redis: aioredis.Redis | None = None
     start_time: float = time.time()
+    url_created_at: float = time.time()   # tracks when public URL was generated
+    api_url: str = ""                      # stored at startup for expiry display
+    ui_url: str  = ""
 
 
 state = _State()
@@ -144,9 +151,19 @@ class ChatRequest(BaseModel):
 
 
 class KeyCreateRequest(BaseModel):
-    name: str = Field(..., max_length=64)
-    quota_tier: str = Field("free", pattern="^(free|pro|enterprise)$")
-    expires_in_days: int | None = Field(None, ge=1, le=365)
+    name:             str        = Field(..., max_length=128)
+    quota_tier:       str        = Field("free", pattern="^(free|pro|enterprise)$")
+    expires_in_hours: float      = Field(90.0, ge=1.0, le=8760.0)  # default 90h, max 1 year
+    projects:         list[str]  = Field(default_factory=list)
+    description:      str        = Field("", max_length=256)
+
+
+class KeyUpdateRequest(BaseModel):
+    name:             str | None       = None
+    description:      str | None       = None
+    projects:         list[str] | None = None
+    quota_tier:       str | None       = None
+    expires_in_hours: float | None     = None   # re-set expiry from now
 
 
 class SessionCreateRequest(BaseModel):
@@ -262,26 +279,85 @@ async def delete_session(
 
 @app.post("/v1/keys")
 async def create_key(req: KeyCreateRequest):
-    """Create an API key (no auth required for bootstrap)."""
-    import uuid, time
-    raw, hashed = generate_key()
-    expires_at = None
-    if req.expires_in_days:
-        expires_at = time.time() + req.expires_in_days * 86400
-
-    from duino_api.auth.keys import APIKey as Key
-    key = Key(
-        key_id=str(uuid.uuid4()),
-        key_hash=hashed,
-        name=req.name,
-        owner_id=str(uuid.uuid4()),
-        quota_tier=req.quota_tier,
-        created_at=time.time(),
-        expires_at=expires_at,
+    """Create a new API key. Default TTL = 90 hours."""
+    raw, key = make_api_key(
+        name             = req.name,
+        quota_tier       = req.quota_tier,
+        expires_in_hours = req.expires_in_hours,
+        projects         = req.projects,
+        description      = req.description,
     )
-    await state.key_store.save(key)
-    return {"api_key": raw, "key_id": key.key_id, "quota_tier": key.quota_tier,
-            "message": "Store this key — it will not be shown again."}
+    await state.key_store.save(key, raw_key=raw)
+    info = key.safe_dict()
+    info["api_key"] = raw   # only time raw key is exposed
+    info["message"] = "Store this key securely — it will NOT be shown again."
+    return info
+
+
+@app.get("/v1/keys")
+async def list_keys(api_key: APIKey = Depends(require_api_key)):
+    """List all API keys (owner-scoped or all for admin)."""
+    keys = await state.key_store.list_all()
+    return {"keys": [k.safe_dict() for k in keys], "total": len(keys)}
+
+
+@app.delete("/v1/keys/{key_id}")
+async def delete_key(
+    key_id: str,
+    api_key: APIKey = Depends(require_api_key),
+):
+    """Revoke an API key by key_id."""
+    # Find key by key_id (scan all)
+    all_keys = await state.key_store.list_all()
+    target = next((k for k in all_keys if k.key_id == key_id), None)
+    if not target:
+        raise HTTPException(404, detail="Key not found")
+    await state.key_store.revoke(target.key_hash)
+    return {"revoked": True, "key_id": key_id}
+
+
+@app.patch("/v1/keys/{key_id}")
+async def update_key(
+    key_id: str,
+    req: KeyUpdateRequest,
+    api_key: APIKey = Depends(require_api_key),
+):
+    """Update name, description, projects, quota_tier, or extend expiry."""
+    all_keys = await state.key_store.list_all()
+    target = next((k for k in all_keys if k.key_id == key_id), None)
+    if not target:
+        raise HTTPException(404, detail="Key not found")
+    fields: dict = {}
+    if req.name        is not None: fields["name"]        = req.name
+    if req.description is not None: fields["description"] = req.description
+    if req.projects    is not None: fields["projects"]    = req.projects
+    if req.quota_tier  is not None: fields["quota_tier"]  = req.quota_tier
+    if req.expires_in_hours is not None:
+        fields["expires_at"] = time.time() + req.expires_in_hours * 3600
+    updated = await state.key_store.update(target.key_hash, **fields)
+    return updated.safe_dict() if updated else {"error": "update failed"}
+
+
+# ─── Routes: URL Expiry ───────────────────────────────────────────────────────
+
+@app.get("/v1/url/expiry")
+async def url_expiry():
+    """Returns countdown until the public Colab proxy URLs expire (90h window)."""
+    ttl = DEFAULT_TTL_SECONDS
+    elapsed  = time.time() - state.url_created_at
+    remaining = max(0.0, ttl - elapsed)
+    h, r = divmod(int(remaining), 3600)
+    m, s = divmod(r, 60)
+    return {
+        "url_created_at":   state.url_created_at,
+        "ttl_seconds":      ttl,
+        "elapsed_seconds":  round(elapsed),
+        "remaining_seconds": round(remaining),
+        "expires_in":       f"{h:02d}h {m:02d}m {s:02d}s",
+        "is_expired":       remaining <= 0,
+        "api_url":          state.api_url,
+        "ui_url":           state.ui_url,
+    }
 
 
 # ─── Routes: Health ───────────────────────────────────────────────────────────
@@ -289,13 +365,19 @@ async def create_key(req: KeyCreateRequest):
 @app.get("/v1/health")
 async def health():
     from duino_api.adapters.detector import EnvironmentDetector
-    caps = EnvironmentDetector.get().capabilities()
+    caps    = EnvironmentDetector.get().capabilities()
+    elapsed = time.time() - state.url_created_at
+    url_remaining = max(0.0, DEFAULT_TTL_SECONDS - elapsed)
+    h, r = divmod(int(url_remaining), 3600)
+    m, s = divmod(r, 60)
     return {
-        "status": "ok",
+        "status":         "ok",
         "uptime_seconds": round(time.time() - state.start_time),
-        "model_loaded": state.engine.loaded if state.engine else False,
+        "model_loaded":   state.engine.loaded if state.engine else False,
         "redis_connected": state.redis is not None,
-        "environment": caps.runtime.value,
-        "gpu": caps.gpu_name,
-        "gpu_vram_mb": caps.gpu_vram_mb,
+        "environment":    caps.runtime.value,
+        "gpu":            caps.gpu_name,
+        "gpu_vram_mb":    caps.gpu_vram_mb,
+        "url_expires_in": f"{h:02d}h {m:02d}m {s:02d}s",
+        "url_remaining_seconds": round(url_remaining),
     }

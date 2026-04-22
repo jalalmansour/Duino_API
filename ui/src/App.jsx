@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import APIKeysPage from './pages/APIKeysPage';
 
 // ── Config (override via postMessage from parent frame) ──────────────────────
 const cfg = {
@@ -28,6 +29,7 @@ export default function App() {
   const [apiUrl, setApiUrl]       = useState(cfg.apiUrl);
   const [showSetup, setShowSetup] = useState(!cfg.apiKey);
   const [health, setHealth]       = useState(null);
+  const [page, setPage]           = useState('chat');  // 'chat' | 'keys'
   const bottomRef = useRef(null);
   const textRef   = useRef(null);
 
@@ -167,50 +169,71 @@ export default function App() {
           <span className="logo">⚡ Duino API</span>
           <span className={`status-dot ${health?.status === 'ok' ? 'online' : 'offline'}`} />
           <span className="status-label">
-            {health ? `${health.environment} · ${health.model_loaded ? '🟢 loaded' : '🔴 no model'}` : 'connecting…'}
+            {health
+              ? `${health.environment} · ${health.model_loaded ? '🟢 loaded' : '🔴 no model'}${
+                  health.url_expires_in ? ` · ⏱ ${health.url_expires_in}` : ''
+                }`
+              : 'connecting…'}
           </span>
         </div>
         <div className="header-right">
+          <button
+            className={`btn-ghost${page === 'chat' ? ' active' : ''}`}
+            onClick={() => setPage('chat')}
+          >💬 Chat</button>
+          <button
+            className={`btn-ghost${page === 'keys' ? ' active' : ''}`}
+            onClick={() => setPage('keys')}
+          >🔑 Keys</button>
           <button className="btn-ghost" onClick={newSession} title="New session">＋ Session</button>
           <button className="btn-ghost" onClick={() => setShowSetup(true)} title="Settings">⚙️</button>
         </div>
       </header>
 
-      {/* Messages */}
-      <main className="messages">
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-icon">🤖</div>
-            <h3>Gemma 4 · Ready</h3>
-            <p>Ask anything. Responses stream in real-time.</p>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={`msg msg-${m.role}`}>
-            <span className="msg-avatar">{m.role === 'user' ? '👤' : '🤖'}</span>
-            <div className="msg-bubble">
-              <ReactMarkdown>{m.content || (streaming && i === messages.length - 1 ? '▋' : '')}</ReactMarkdown>
-            </div>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </main>
+      {/* Page routing */}
+      {page === 'keys' ? (
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          <APIKeysPage apiUrl={apiUrl} initialApiKey={apiKey} />
+        </div>
+      ) : (
+        <>
+          {/* Messages */}
+          <main className="messages">
+            {messages.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-icon">🤖</div>
+                <h3>Gemma 4 · Ready</h3>
+                <p>Ask anything. Responses stream in real-time.</p>
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={`msg msg-${m.role}`}>
+                <span className="msg-avatar">{m.role === 'user' ? '👤' : '🤖'}</span>
+                <div className="msg-bubble">
+                  <ReactMarkdown>{m.content || (streaming && i === messages.length - 1 ? '▋' : '')}</ReactMarkdown>
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </main>
 
-      {/* Input */}
-      <footer className="input-bar">
-        <textarea
-          ref={textRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={onKey}
-          placeholder="Message Gemma 4… (Enter to send, Shift+Enter for newline)"
-          rows={1}
-          disabled={streaming}
-        />
-        <button className="btn-send" onClick={send} disabled={streaming || !input.trim()}>
-          {streaming ? '⏳' : '➤'}
-        </button>
-      </footer>
+          {/* Input */}
+          <footer className="input-bar">
+            <textarea
+              ref={textRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={onKey}
+              placeholder="Message Gemma 4… (Enter to send, Shift+Enter for newline)"
+              rows={1}
+              disabled={streaming}
+            />
+            <button className="btn-send" onClick={send} disabled={streaming || !input.trim()}>
+              {streaming ? '⏳' : '➤'}
+            </button>
+          </footer>
+        </>
+      )}
     </div>
   );
 }
