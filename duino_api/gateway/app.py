@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     cfg = GEMMA4_MODELS.get(settings.default_model)
     if cfg:
         cfg.quant = cfg.quant or caps.recommended_quant
-        engine = InferenceEngine(cfg, device=adapter.gpu_device(), quant=cfg.quant)
+        engine = InferenceEngine(cfg, quant=cfg.quant)
         try:
             engine.load()
             state.engine = engine
